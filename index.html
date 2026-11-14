@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="strict-origin-when-cross-origin">
+<title>Player</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
+  #p { width: 100%; height: 100%; }
+</style>
+</head>
+<body>
+<div id="p"></div>
+<script>
+// A YouTube player for a TV home screen app. YouTube plays embedded videos only on pages served
+// from a website, so the TV app shows this page in a frame and drives it with messages:
+//   to this page:   {yt: "playlist", list, index} {yt: "video", id} {yt: "cue", list, index}
+//                   {yt: "play"} {yt: "pause"} {yt: "next"} {yt: "prev"} {yt: "stop"} {yt: "shuffle", on}
+//   from this page: {yt: "ready"} {yt: "state", ...} {yt: "error", code}
+// It holds nothing personal: the playlist and everything else come from the app that frames it.
+(function () {
+  "use strict";
+  var player = null, ready = false, queued = [];
+  function tell(msg) { msg.yt = msg.yt || "state"; try { parent.postMessage(msg, "*"); } catch (e) {} }
+  function state() {
+    if (!ready) return;
+    var d = player.getVideoData ? player.getVideoData() : {};
+    tell({ yt: "state", state: player.getPlayerState(), time: player.getCurrentTime() || 0, duration: player.getDuration() || 0,
+           id: d && d.video_id, title: d && d.title, author: d && d.author,
+           list: player.getPlaylist ? player.getPlaylist() : null, index: player.getPlaylistIndex ? player.getPlaylistIndex() : -1 });
+  }
+  function run(m) {
+    if (!ready) { queued.push(m); return; }
+    var safeId = function (x) { return /^[A-Za-z0-9_-]{6,64}$/.test(String(x || "")); };
+    switch (m.yt) {
+      case "playlist": if (safeId(m.list)) player.loadPlaylist({ listType: "playlist", list: m.list, index: m.index | 0 }); break;
+      case "cue": if (safeId(m.list)) player.cuePlaylist({ listType: "playlist", list: m.list, index: m.index | 0 }); break;
+      case "video": if (safeId(m.id)) player.loadVideoById(m.id); break;
+      case "play": player.playVideo(); break;
+      case "pause": player.pauseVideo(); break;
+      case "next": player.nextVideo(); break;
+      case "prev": player.previousVideo(); break;
+      case "stop": player.stopVideo(); break;
+      case "shuffle": player.setShuffle(!!m.on); break;
+    }
+    setTimeout(state, 50);
+  }
+  window.addEventListener("message", function (e) {
+    var m = e.data;
+    if (e.source !== parent || !m || typeof m.yt !== "string") return;   // only the app that frames this page
+    run(m);
+  });
+  window.onYouTubeIframeAPIReady = function () {
+    player = new YT.Player("p", {
+      width: "100%", height: "100%",
+      playerVars: { autoplay: 1, controls: 0, rel: 0, modestbranding: 1, playsinline: 1, iv_load_policy: 3, disablekb: 1, fs: 0 },
+      events: {
+        onReady: function () { ready = true; tell({ yt: "ready" }); var q = queued; queued = []; q.forEach(run); },
+        onStateChange: function () { state(); },
+        onError: function (e) { tell({ yt: "error", code: e && e.data }); }
+      }
+    });
+    setInterval(state, 250);
+  };
+  var s = document.createElement("script");
+  s.src = "https://www.youtube.com/iframe_api";
+  document.head.appendChild(s);
+})();
+</script>
+</body>
+</html>
